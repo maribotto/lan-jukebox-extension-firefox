@@ -26,29 +26,28 @@ function normalizeServerUrl(url) {
   return url;
 }
 
-// Smart fetch that tries HTTPS if HTTP fails
-async function smartFetch(url, options = {}) {
-  try {
-    const response = await fetch(url, options);
-    return { response, finalUrl: url };
-  } catch (error) {
-    // If HTTP failed and URL starts with http://, try https://
-    if (url.startsWith('http://')) {
-      const httpsUrl = url.replace('http://', 'https://');
-      console.log(`HTTP failed, trying HTTPS: ${httpsUrl}`);
-
-      try {
-        const response = await fetch(httpsUrl, options);
-        return { response, finalUrl: httpsUrl };
-      } catch (httpsError) {
-        // Both failed, throw original error
-        throw error;
+// Make API call via background script to bypass CORS
+async function apiCall(endpoint, serverUrl, method = 'GET', body = null) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        action: 'apiCall',
+        endpoint,
+        serverUrl,
+        method,
+        body
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else if (response.success) {
+          resolve(response);
+        } else {
+          reject(new Error(response.error));
+        }
       }
-    }
-
-    // Not HTTP or already HTTPS, throw original error
-    throw error;
-  }
+    );
+  });
 }
 
 // Load saved settings
@@ -181,13 +180,11 @@ addButton.addEventListener('click', async () => {
 
   try {
     // Check if authentication is required
-    const { response: authStatusResponse, finalUrl: authUrl } = await smartFetch(`${serverUrl}/api/auth-status`, {
-      credentials: 'include'
-    });
+    const authStatusResult = await apiCall('/api/auth-status', serverUrl);
 
     // Update serverUrl if HTTPS was used successfully
-    if (authUrl !== `${serverUrl}/api/auth-status`) {
-      serverUrl = authUrl.replace('/api/auth-status', '');
+    if (authStatusResult.updatedServerUrl !== serverUrl) {
+      serverUrl = authStatusResult.updatedServerUrl;
       serverUrlInput.value = serverUrl;
       chrome.storage.sync.set({ serverUrl });
       console.log(`Updated to HTTPS: ${serverUrl}`);
@@ -196,10 +193,9 @@ addButton.addEventListener('click', async () => {
     let needsAuth = false;
     let isAuthenticated = false;
 
-    if (authStatusResponse.ok) {
-      const authStatus = await authStatusResponse.json();
-      needsAuth = authStatus.requireLogin;
-      isAuthenticated = authStatus.authenticated;
+    if (authStatusResult.ok) {
+      needsAuth = authStatusResult.data.requireLogin;
+      isAuthenticated = authStatusResult.data.authenticated;
     }
 
     // If auth is required and we're not authenticated, try to login
@@ -215,16 +211,9 @@ addButton.addEventListener('click', async () => {
       }
 
       // Try to login
-      const { response: loginResponse } = await smartFetch(`${serverUrl}/api/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify({ username, password })
-      });
+      const loginResult = await apiCall('/api/login', serverUrl, 'POST', { username, password });
 
-      if (!loginResponse.ok) {
+      if (!loginResult.ok) {
         showStatus('Login failed! Check your credentials.', 'error');
         addButton.disabled = false;
         return;
@@ -232,29 +221,20 @@ addButton.addEventListener('click', async () => {
     }
 
     // Now add the video
-    const { response } = await smartFetch(`${serverUrl}/api/add`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        videoUrl: currentVideoData.url
-      })
+    const addResult = await apiCall('/api/add', serverUrl, 'POST', {
+      videoUrl: currentVideoData.url
     });
 
-    const result = await response.json();
-
-    if (response.ok && result.success) {
-      showStatus(`Added: ${result.video.title}`, 'success');
+    if (addResult.ok && addResult.data.success) {
+      showStatus(`Added: ${addResult.data.video.title}`, 'success');
 
       // Update video title if we got a better one from the server
-      if (result.video.title && result.video.title !== currentVideoData.title) {
-        currentVideoData.title = result.video.title;
-        videoTitle.textContent = result.video.title;
+      if (addResult.data.video.title && addResult.data.video.title !== currentVideoData.title) {
+        currentVideoData.title = addResult.data.video.title;
+        videoTitle.textContent = addResult.data.video.title;
       }
     } else {
-      showStatus(`Error: ${result.message || 'Unknown error'}`, 'error');
+      showStatus(`Error: ${addResult.data.message || 'Unknown error'}`, 'error');
       addButton.disabled = false;
     }
   } catch (error) {
