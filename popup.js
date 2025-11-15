@@ -28,6 +28,7 @@ function normalizeServerUrl(url) {
 
 // Make API call via background script to bypass CORS
 async function apiCall(endpoint, serverUrl, method = 'GET', body = null) {
+  console.log('Sending message to background:', { endpoint, serverUrl, method, body });
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
@@ -38,12 +39,14 @@ async function apiCall(endpoint, serverUrl, method = 'GET', body = null) {
         body
       },
       (response) => {
+        console.log('Received response from background:', response);
         if (chrome.runtime.lastError) {
+          console.error('Chrome runtime error:', chrome.runtime.lastError);
           reject(new Error(chrome.runtime.lastError.message));
-        } else if (response.success) {
+        } else if (response && response.success) {
           resolve(response);
         } else {
-          reject(new Error(response.error));
+          reject(new Error(response ? response.error : 'No response from background script'));
         }
       }
     );

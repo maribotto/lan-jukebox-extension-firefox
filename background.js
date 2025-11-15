@@ -1,6 +1,8 @@
 // Background script for LAN Jukebox extension
 // This handles all API calls to bypass CORS restrictions
 
+console.log('LAN Jukebox background script loaded');
+
 // Smart fetch that tries HTTPS if HTTP fails
 async function smartFetch(url, options = {}) {
   try {
@@ -28,8 +30,12 @@ async function smartFetch(url, options = {}) {
 
 // Message handler for popup requests
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('Background received message:', request);
   if (request.action === 'apiCall') {
-    handleApiCall(request).then(sendResponse);
+    handleApiCall(request).then(sendResponse).catch(error => {
+      console.error('Error in handleApiCall:', error);
+      sendResponse({ success: false, error: error.message });
+    });
     return true; // Will respond asynchronously
   }
 });
@@ -40,6 +46,8 @@ async function handleApiCall(request) {
 
   try {
     const url = `${serverUrl}${endpoint}`;
+    console.log(`Making API call to: ${url}`);
+
     const options = {
       method,
       credentials: 'include',
@@ -52,7 +60,9 @@ async function handleApiCall(request) {
       options.body = JSON.stringify(body);
     }
 
+    console.log('Fetch options:', options);
     const { response, finalUrl } = await smartFetch(url, options);
+    console.log('Fetch successful:', finalUrl, 'Status:', response.status);
 
     // Determine the updated server URL if HTTPS was used
     let updatedServerUrl = serverUrl;
