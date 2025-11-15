@@ -17,6 +17,9 @@
     "http://*/*",
     "https://*/*"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; connect-src 'self' http://* https://*;"
+  },
   "background": {
     "scripts": ["background.js"]
   },
